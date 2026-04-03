@@ -71,7 +71,6 @@ def procesar_archivo_evidencia(uploaded_file):
 class SupervisionPDF(FPDF):
     def __init__(self):
         super().__init__()
-        # Configurar color de borde general a un gris suave (Moderno)
         self.set_draw_color(220, 220, 220)
 
     def header(self):
@@ -92,7 +91,12 @@ class SupervisionPDF(FPDF):
         self.set_text_color(150, 150, 150)
         self.cell(0, 10, f"Pagina {self.page_no()} - Documento Confidencial", align="C")
 
-    def t_seccion(self, numero, texto):
+    # MEJORA: Se agregó "espacio_necesario" para evitar títulos huérfanos
+    def t_seccion(self, numero, texto, espacio_necesario=30):
+        # Si el espacio actual (y) más lo que necesita la sección supera el largo de la hoja (275mm)...
+        if self.get_y() + espacio_necesario > 275:
+            self.add_page() # ...crea una página nueva ANTES de imprimir el título.
+            
         self.ln(6)
         self.set_font("Arial", "B", 10)
         self.set_fill_color(204, 0, 0) # ROJO
@@ -104,13 +108,13 @@ class SupervisionPDF(FPDF):
     def tabla(self, header, data, widths):
         self.set_font("Arial", "B", 8)
         self.set_fill_color(0, 160, 224) # CELESTE
-        self.set_text_color(255, 255, 255) # BLANCO
+        self.set_text_color(255, 255, 255)
         for i, h in enumerate(header): 
             self.cell(widths[i], 8, h, 1, 0, 'C', True)
         self.ln()
         self.set_font("Arial", "", 8)
         self.set_text_color(0, 0, 0)
-        self.set_fill_color(248, 249, 250) # Fondo de fila super claro
+        self.set_fill_color(248, 249, 250)
         for row in data:
             for i, d in enumerate(row): 
                 self.cell(widths[i], 7, str(d), 1, 0, 'C', True)
@@ -121,36 +125,31 @@ class SupervisionPDF(FPDF):
         for i, f in enumerate(fotos):
             tmp, w, h = procesar_archivo_evidencia(f)
             if tmp:
-                # Calcular la proporción para no deformar la imagen
                 ratio = h / w if w > 0 else 1
                 
-                # Tamaños máximos permitidos en la hoja (vertical y grande)
-                max_w = 150
-                max_h = 220
+                # Redujimos un par de cm el alto para asegurar que conviva con el título
+                max_w = 140
+                max_h = 190 
                 
                 calc_w = max_w
                 calc_h = max_w * ratio
                 
-                # Si la imagen es muy alta, ajustamos por altura
                 if calc_h > max_h:
                     calc_h = max_h
                     calc_w = max_h / ratio
                 
-                # Revisar si cabe en la página actual; si no, creamos una nueva
-                if self.get_y() + calc_h > 270:
+                if self.get_y() + calc_h > 275:
                     self.add_page()
-                    self.set_y(40) # Dar espacio debajo del encabezado
                 
-                # Centrar la imagen horizontalmente en la hoja
                 x_pos = (210 - calc_w) / 2
                 
                 self.image(tmp, x=x_pos, y=self.get_y(), w=calc_w, h=calc_h)
-                self.ln(calc_h + 15) # Espacio entre cada imagen
+                self.ln(calc_h + 10) # Espacio entre fotos
                 
                 os.remove(tmp)
 
 # ==============================================================================
-# BASES DE DATOS COMPLETAS RESTAURADAS
+# BASES DE DATOS COMPLETAS
 # ==============================================================================
 DATABASE_CLIENTES = {
     "AGROCOMMERCE": "Av. José Miguel Infante 8745, Renca, Región Metropolitana",
@@ -439,7 +438,6 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
             pdf.set_font("Arial", "B", 9)
             pdf.set_fill_color(0, 160, 224)
             pdf.set_text_color(255, 255, 255)
-            # Bordes mas sutiles
             pdf.cell(0, 7, "  Desviaciones Registradas:", border=0, ln=1, fill=True)
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Arial", "", 9)
@@ -453,7 +451,8 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
         pdf.cell(90, 8, f"RESULTADO BONO: {bono_resultado}", border=1, ln=1, fill=True)
         pdf.cell(190, 8, f"ACCION: {accion_kpi}", border=1, ln=1, fill=True)
         
-        pdf.t_seccion("5", "ANALISIS DE CAUSAS")
+        # MEJORA: Pedimos al menos 50mm libres para asegurar que Análisis de Causas esté junto
+        pdf.t_seccion("5", "ANALISIS DE CAUSAS", espacio_necesario=50)
         pdf.set_font("Arial", "B", 9)
         pdf.cell(0, 6, "Causas Inmediatas:", ln=1)
         pdf.set_font("Arial", "", 9)
@@ -464,7 +463,7 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
         pdf.set_font("Arial", "", 9)
         pdf.multi_cell(0, 6, causa_raiz if causa_raiz else "N/A", border=1)
         
-        pdf.t_seccion("6", "PLAN DE ACCION (MEDIDAS CORRECTIVAS)")
+        pdf.t_seccion("6", "PLAN DE ACCION (MEDIDAS CORRECTIVAS)", espacio_necesario=50)
         pdf.set_font("Arial", "B", 9)
         pdf.cell(40, 7, "Responsable:", border=1)
         pdf.set_font("Arial", "", 9)
@@ -474,27 +473,28 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
         pdf.set_font("Arial", "", 9)
         pdf.cell(150, 7, str(fecha_accion_inv), border=1, ln=1)
         
-        # Corrección visual del título Acción Correctiva
         pdf.set_font("Arial", "B", 9)
-        pdf.set_fill_color(0, 160, 224) # Celeste
-        pdf.set_text_color(255, 255, 255) # Blanco
+        pdf.set_fill_color(0, 160, 224) 
+        pdf.set_text_color(255, 255, 255) 
         pdf.cell(0, 7, " Accion Correctiva a Implementar:", border=0, ln=1, fill=True)
-        pdf.set_text_color(0, 0, 0) # De vuelta a negro
+        pdf.set_text_color(0, 0, 0) 
         pdf.set_font("Arial", "", 9)
         pdf.multi_cell(0, 7, accion_inv if accion_inv else "Sin acciones registradas.", border=1)
         
-        # --- SECCIÓN DE FIRMA ---
         if firma_archivo:
-            pdf.t_seccion("7", "FIRMA DEL SUPERVISOR")
+            # MEJORA: Asegurar que haya espacio para la firma (al menos 60mm)
+            pdf.t_seccion("7", "FIRMA DEL SUPERVISOR", espacio_necesario=60)
             tmp_firma, _, _ = procesar_archivo_evidencia(firma_archivo)
             if tmp_firma:
-                x_firma = (210 - 50) / 2 # Centrado horizontal
+                x_firma = (210 - 50) / 2 
                 pdf.image(tmp_firma, x=x_firma, y=pdf.get_y(), w=50)
                 pdf.ln(40)
                 os.remove(tmp_firma)
         
         if fotos_incidentes:
-            pdf.t_seccion("8", "EVIDENCIA FOTOGRAFICA Y DOCUMENTAL")
+            # MEJORA: Obligamos a reservar 100mm para que el título de evidencias 
+            # sí o sí salga con la primera imagen pegada
+            pdf.t_seccion("8", "EVIDENCIA FOTOGRAFICA Y DOCUMENTAL", espacio_necesario=100)
             pdf.galeria(fotos_incidentes)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
