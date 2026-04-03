@@ -121,15 +121,36 @@ class SupervisionPDF(FPDF):
         for i, f in enumerate(fotos):
             tmp, w, h = procesar_archivo_evidencia(f)
             if tmp:
-                if self.get_y() > 210: self.add_page(); self.set_y(45); i_mod = 0
-                else: i_mod = i % 2
-                if i_mod == 0: y_act = self.get_y(); self.image(tmp, x=10, y=y_act, w=90, h=65)
-                else: self.image(tmp, x=110, y=y_act, w=90, h=65); self.ln(70)
+                # Calcular la proporción para no deformar la imagen
+                ratio = h / w if w > 0 else 1
+                
+                # Tamaños máximos permitidos en la hoja (vertical y grande)
+                max_w = 150
+                max_h = 220
+                
+                calc_w = max_w
+                calc_h = max_w * ratio
+                
+                # Si la imagen es muy alta, ajustamos por altura
+                if calc_h > max_h:
+                    calc_h = max_h
+                    calc_w = max_h / ratio
+                
+                # Revisar si cabe en la página actual; si no, creamos una nueva
+                if self.get_y() + calc_h > 270:
+                    self.add_page()
+                    self.set_y(40) # Dar espacio debajo del encabezado
+                
+                # Centrar la imagen horizontalmente en la hoja
+                x_pos = (210 - calc_w) / 2
+                
+                self.image(tmp, x=x_pos, y=self.get_y(), w=calc_w, h=calc_h)
+                self.ln(calc_h + 15) # Espacio entre cada imagen
+                
                 os.remove(tmp)
-        if len(fotos) % 2 != 0: self.ln(70)
 
 # ==============================================================================
-# BASES DE DATOS RESTAURADAS AL 100%
+# BASES DE DATOS COMPLETAS RESTAURADAS
 # ==============================================================================
 DATABASE_CLIENTES = {
     "AGROCOMMERCE": "Av. José Miguel Infante 8745, Renca, Región Metropolitana",
