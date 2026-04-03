@@ -3,6 +3,8 @@ import datetime
 import os
 import tempfile
 import gc
+import io
+import fitz  # Esta es la librería mágica PyMuPDF
 from fpdf import FPDF
 from PIL import Image, ImageOps
 
@@ -18,7 +20,6 @@ except ImportError:
 # ==============================================================================
 st.set_page_config(layout="wide", page_title="Rentokil - Panel de Supervisión")
 
-# Nuevos colores solicitados
 COLOR_ROJO = "#CC0000"
 COLOR_CELESTE = "#00A0E0"
 COLOR_AZUL_OSCURO = "#002B49"
@@ -28,51 +29,56 @@ st.markdown(f"""
     .stApp header {{background-color: transparent;}}
     h1, h2, h3, h4 {{color: {COLOR_AZUL_OSCURO};}}
     div[data-testid="stForm"] {{ border: 2px solid {COLOR_ROJO}; border-radius: 10px; padding: 20px; }}
-    button[kind="primary"] {{
-        background-color: {COLOR_ROJO} !important;
-        border-color: {COLOR_ROJO} !important;
-        color: white !important;
-        font-weight: bold !important;
-    }}
-    button[kind="primary"]:hover {{
-        background-color: {COLOR_AZUL_OSCURO} !important;
-        border-color: {COLOR_AZUL_OSCURO} !important;
-    }}
+    button[kind="primary"] {{ background-color: {COLOR_ROJO} !important; border-color: {COLOR_ROJO} !important; color: white !important; font-weight: bold !important; }}
+    button[kind="primary"]:hover {{ background-color: {COLOR_AZUL_OSCURO} !important; border-color: {COLOR_AZUL_OSCURO} !important; }}
     </style>
 """, unsafe_allow_html=True)
 
-# Memoria de estado para la hora y el PDF
-if "hora_incidente_def" not in st.session_state:
-    st.session_state.hora_incidente_def = datetime.datetime.now().time()
-if "pdf_supervision" not in st.session_state:
-    st.session_state.pdf_supervision = None
+if "hora_incidente_def" not in st.session_state: st.session_state.hora_incidente_def = datetime.datetime.now().time()
+if "pdf_supervision" not in st.session_state: st.session_state.pdf_supervision = None
 
 # ==============================================================================
 # FUNCIONES PARA IMÁGENES Y PDF
 # ==============================================================================
-def procesar_imagen_full(uploaded_file):
+def procesar_archivo_evidencia(uploaded_file):
+    """Procesa tanto imágenes normales como la primera página de un PDF"""
     try:
         uploaded_file.seek(0)
-        image = Image.open(uploaded_file)
-        image = ImageOps.exif_transpose(image)
-        if image.mode != 'RGB': image = image.convert('RGB')
+        file_bytes = uploaded_file.read()
+        
+        # Si es un PDF, extraemos la primera página como imagen
+        if uploaded_file.name.lower().endswith('.pdf'):
+            doc = fitz.open("pdf", file_bytes)
+            page = doc.load_page(0)
+            pix = page.get_pixmap(dpi=150) # Calidad de la imagen
+            image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            doc.close()
+        else:
+            # Si es imagen normal
+            image = Image.open(io.BytesIO(file_bytes))
+            image = ImageOps.exif_transpose(image)
+            if image.mode != 'RGB': image = image.convert('RGB')
+            
+        # Redimensionar para no saturar el PDF final
         if image.width > 1600 or image.height > 1600:
             image.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+            
         w, h = image.size
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
         image.save(tmp.name, format='JPEG', quality=85, optimize=True)
         image.close(); del image; gc.collect()
         return tmp.name, w, h
-    except: return None, 0, 0
+    except Exception as e:
+        st.error(f"Error procesando archivo {uploaded_file.name}: {e}")
+        return None, 0, 0
 
 class SupervisionPDF(FPDF):
     def header(self):
-        # Busca el logo en la misma carpeta que el script
         if os.path.exists('logo.png'):
             try: self.image('logo.png', 10, 8, 33)
             except: pass
         self.set_font("Arial", "B", 14)
-        self.set_text_color(0, 43, 73) # AZUL OSCURO
+        self.set_text_color(0, 43, 73)
         self.cell(0, 8, "INFORME DE INVESTIGACION Y KPI", ln=1, align="R")
         self.set_font("Arial", "I", 8)
         self.set_text_color(100, 100, 100)
@@ -88,7 +94,7 @@ class SupervisionPDF(FPDF):
     def t_seccion(self, numero, texto):
         self.ln(5)
         self.set_font("Arial", "B", 10)
-        self.set_fill_color(204, 0, 0) # ROJO para áreas principales
+        self.set_fill_color(204, 0, 0)
         self.set_text_color(255, 255, 255)
         self.cell(0, 7, f"  {numero}. {texto.upper()}", ln=1, fill=True)
         self.set_text_color(0, 0, 0)
@@ -96,13 +102,13 @@ class SupervisionPDF(FPDF):
 
     def tabla(self, header, data, widths):
         self.set_font("Arial", "B", 8)
-        self.set_fill_color(0, 160, 224) # CELESTE para encabezados de tabla
+        self.set_fill_color(0, 160, 224)
         self.set_text_color(255, 255, 255)
         for i, h in enumerate(header): self.cell(widths[i], 8, h, 1, 0, 'C', True)
         self.ln()
         self.set_font("Arial", "", 8)
         self.set_text_color(0, 0, 0)
-        self.set_fill_color(240, 248, 255) # Fondo muy suave
+        self.set_fill_color(240, 248, 255)
         for row in data:
             for i, d in enumerate(row): self.cell(widths[i], 6, str(d), 1, 0, 'C', True)
             self.ln()
@@ -110,7 +116,7 @@ class SupervisionPDF(FPDF):
     def galeria(self, fotos):
         if not fotos: return
         for i, f in enumerate(fotos):
-            tmp, w, h = procesar_imagen_full(f)
+            tmp, w, h = procesar_archivo_evidencia(f)
             if tmp:
                 if self.get_y() > 210: self.add_page(); self.set_y(45); i_mod = 0
                 else: i_mod = i % 2
@@ -120,84 +126,19 @@ class SupervisionPDF(FPDF):
         if len(fotos) % 2 != 0: self.ln(70)
 
 # ==============================================================================
-# BASES DE DATOS
+# BASES DE DATOS ACTUALIZADAS
 # ==============================================================================
-DATABASE_CLIENTES = {
-    "AGROCOMMERCE": "Av. José Miguel Infante 8745, Renca, Región Metropolitana",
-    "TUCAPEL CD": "VOLCAN LINCABUR 435, PUDAHUEL",
-    "ECONUT PARCELA 30": "18 SEPT, Paine",
-    "CV TRADING": "CAMINO VALDIVIA DE PAINE S/N BUIN",
-    "CALBU BUIN": "La Estancilla 8991, Buin, Región Metropolitana",
-    "LA PINTANA": "Lautaro 2260, La Pintana",
-    "PUENTE VERDE": "Avenida Puente Verde 2080, Quilicura",
-    "FINE FRUITS": "PAULA JARAQUEMADA, PAINE",
-    "STARFOOD": "Bernardo O'Higgins 150, 9361274 Colina, Región Metropolitana",
-    "TUCAPEL STGO CENTRO": "Tucapel 3140, Santiago, Bodega 10 PNC",
-    "MALTEXCO": "Bellavista 681, 9680086 Talagante, Región Metropolitana, Chile",
-    "NAMA": "Cam. Bernardo O'Higgins 20137, Pudahuel, Región Metropolitana, Chile",
-    "PRUNESCO": "RAMON SUBERCASEUX 2712, Pirque, Chile",
-    "WALMART": "Av. El Parque 1000, Pudahuel, Región Metropolitana",
-    "LA INVERNADA": "CAMINO SAN MIGUEL PARC 2 PAINE",
-    "AGROCOMMERCE LOGINSA": "LO SIERRA 04460 SAN BDO",
-    "PACKING MERQUEN": "PANAM. SUR KM. 40 , PAINE",
-    "CHOROMBO": "CAMINO PUBLICO CASABLANCA KM. 22, MARIA PINTO",
-    "MOLINO PUENTE ALTO": "BALMACEDA 27 PTE ALTO",
-    "VITAKAI": "CAMINO STA. CECILIA PARC SAN EDO., EL MONTE",
-    "DAFF": "PANAM. NORTE 16950 LAMPA",
-    "CRAMER": "BALMACEDA 3050 PEÑAFLOR",
-    "LA TAPERA": "SAN MIGUEL DE LIRAY PARCELA 16 Y 17 COLINA",
-    "GROWEX": "CAMINO LAS PARCELAS 21 ISLA DE MAIPO",
-    "BALMACEDA": "BALMACEDA 1726 STGO",
-    "GOOD FOOD": "BALMACEDA 3050 PEÑAFLOR",
-    "KIOSCLUB": "JUAN ELIAS 1701 RECOLETA",
-    "PRODALMEN": "FUNDO CHALLAY ALTO, HUELQUEN, PAINE",
-    "DEGESCH": "JOSE LUIS CARO 1321, PADRE HURTADO",
-    "CAROZZI NOS": "LONGITUDINAL SUR 5201, NOS",
-    "MSC MAIPU": "AV. PAJARITOS 1061 MAIPU",
-    "MOLINO EXPOSICION": "AV. EXPOSICION 1657 EST CENTRAL",
-    "MOLINO BALMACEDA": "BALMACEDA 1726 STGO",
-    "MSC EXPOSICION": "AV. EXPOSICION 1657 EST CENTRAL",
-    "TALLER GAMMA": "Mapocho  # 4573 , Quinta Normal.",
-    "CAMPO ANDINO": "CAMINO EL OLIVETO 4193 TALAGANTE",
-    "OTRO": ""
-}
+DATABASE_CLIENTES = {"AGROCOMMERCE": "Av. José Miguel Infante 8745, Renca", "TUCAPEL CD": "VOLCAN LINCABUR 435, PUDAHUEL", "OTRO": ""}
+DATABASE_PERSONAL = {"Marcos Escobar": {"rut": "8.546.549-K", "cargo": "Técnico"}, "Carlos Narbona": {"rut": "20.121.067-K", "cargo": "Representante Técnico"}, "OTRO": {"rut": "", "cargo": ""}}
 
-DATABASE_PERSONAL = {
-    "Marcos Escobar": {"rut": "8.546.549-K", "cargo": "Técnico"},
-    "Carlos Narbona": {"rut": "20.121.067-K", "cargo": "Representante Técnico"},
-    "Cristian Corral": {"rut": "16.630.012-6", "cargo": "Técnico"},
-    "Eduardo Inostroza": {"rut": "18.692.998-5", "cargo": "Técnico"},
-    "Juan Vásquez": {"rut": "15.629.902-2", "cargo": "Técnico"},
-    "Maximiliano Caro": {"rut": "20.120.770-3", "cargo": "Representante Técnico"},
-    "Víctor Becerra": {"rut": "17.759.655-8", "cargo": "Técnico"},
-    "Sebastián Carrillo": {"rut": "19.514.568-7", "cargo": "Representante Técnico"},
-    "Cristian Saavedra": {"rut": "19.703.885-3", "cargo": "Técnico"},
-    "Juan Callofa": {"rut": "15.531.428-1", "cargo": "Representante Técnico"},
-    "OTRO": {"rut": "", "cargo": ""}
-}
-
-# --- BASE DE DATOS ACTUALIZADA CON RIOHS Y CONTRATO ---
 DATABASE_KPI_ESTRUCTURADA = {
     "Plagas": {
         "Servicio desinsectacion sin señaletica calavera, medidas preventivas en el mes": 8,
         "Servicio sanitizacion baños sin sanitizar y marcaje durante el mes": 4,
-        "Servicio sanitizacion baños sin sanitizar y marcaje por 2 vez": 8,
-        "Servicio de desinsectacion y sanitizacion desprolijo (durante el mes)": 4,
-        "Servicio de desinsectacion y sanitizacion desprolijo (por 2 vez)": 8,
-        "Mantencion desprolija de dispositivos de control, feromonas (durante el mes)": 4,
-        "Mantencion desprolija de dispositivos de control, feromonas (por 2 vez)": 8,
-        "Mantencion desprolija de dispositivos de control, tuv (durante el mes)": 4,
-        "Mantencion desprolija de dispositivos de control, tuv (por 2 vez)": 8,
-        "Mantencion desprolija de dispositivos de control, en mal estado (durante el mes)": 4,
-        "Mantencion desprolija de dispositivos de control, en mal estado (por 2 vez)": 8,
-        "No realización de planos durante la instalacion/emergencia (durante el mes)": 4,
-        "No realización de planos durante la instalacion/emergencia (por 2 vez)": 8,
-        "Devolucion de guia de despacho (durante el mes)": 4,
-        "Devolucion de guia de despacho (por 2 vez)": 8
+        "Servicio de desinsectacion y sanitizacion desprolijo (por 2 vez)": 8
     },
     "Fumigaciones": {
         "No realizar inyeccion/ventilacion según proc. (Sin fugas, en el mes)": 4,
-        "No realizar inyeccion/ventilacion según proc. (Sin fugas, por 2 vez)": 8,
         "No realizar inyeccion/ventilacion según proc. (Con fugas o riesgo)": 8
     },
     "Rapaces": {
@@ -205,51 +146,36 @@ DATABASE_KPI_ESTRUCTURADA = {
         "Mantencion desprolija de dispositivos de control de aves (por 2 vez)": 8
     },
     "Termitas": {
-        "[RELLENO] Falta leve Termitas": 4,
-        "[RELLENO] Falta grave Termitas": 8
+        "Mantencion desprolija de dispositivos de control de termitas ( Estacion con cebos en mal estado) durante el mes": 4,
+        "Mantencion desprolija de dispositivos de control de termitas ( Estacion con cebos en mal estado)  por 2 vez": 8,
+        "Procedimiento mal aplicado": 8
     },
     "Bioservicios": {
-        "[RELLENO] Falta leve Bioservicios": 4,
-        "[RELLENO] Falta grave Bioservicios": 8
+        "Devolucion de guia de despacho de manera semanal a su ejecutivo o encargada de control documental en el mes": 4,
+        "Devolucion de guia de despacho de manera semanal a su ejecutivo o encargada de control documental por 2 vez": 8,
+        "Mal uso de equipos o herramientas propias de la linea de negocio en el mes": 4,
+        "Mal uso de equipos o herramientas propias de la linea de negocio por 2 vez": 8,
+        "Mantencion desprolija o falta de acciones correctivas en el sistema de tratamiento de bioservicio en el mes": 4,
+        "Mantencion desprolija o falta de acciones correctivas en el sistema de tratamiento de bioservicio por 2 vez": 8,
+        "Mantencion desprolija del servicio, no cumplimiento de las directrices operacionales o documentales 1 vez": 4,
+        "Mantencion desprolija del servicio, no cumplimiento de las directrices operacionales o documentales 2 vez": 8
     },
     "Higiene": {
-        "[RELLENO] Falta leve Higiene": 4,
-        "[RELLENO] Falta grave Higiene": 8
+        "No Cumplir en un 100% con el Registro de Devolución de Producto y guías, (Fecha y Forma) en el mes": 4,
+        "No Cumplir en un 100% con el Registro de Devolución de Producto y guías, (Fecha y Forma) por 2 vez": 8,
+        "No Cumplir en un 100% con el Registro de Devolución de Producto y guías, (Fecha y Forma) por 3 vez": 8,
+        "No dejar productos ni residuos en clientes no autorizados por la jefatura ( Bolsas, latas, spray etc ) 1 vez": 4,
+        "No dejar productos ni residuos en clientes no autorizados por la jefatura ( Bolsas, latas, spray etc ) 2 vez": 8,
+        "Servicios desprolijos (Mantenciones o instalaciones incompletas o incorrectas) en el mes": 4,
+        "Servicios desprolijos (Mantenciones o instalaciones incompletas o incorrectas) por 2 vez": 8
     },
     "Seguridad": {
         "No realiza Check List de Vehículos durante el mes": 8,
-        "Tener accidentes de responsabilidad directa": 8,
-        "Uso incorrecto de EPP": 8,
-        "No usar EPP para los riesgos asociados en el lugar de trabajo": 8,
-        "Reclamo de cliente asociado a la Seguridad o mala conducción (durante el mes)": 4,
-        "Reclamo de cliente asociado a la Seguridad o mala conducción (2 vez)": 8,
-        "No dar aviso de manera inmediata cuando ocurra un accidente o incidente": 8,
-        "Realiza trabajo en altura/confinado sin examenes medicos al dia": 8,
-        "Conducir a exceso de velocidad 1 a 5 km/h (1 min)": 4,
-        "Conducir a exceso de velocidad 6 a 9 km/h (1 min)": 8,
-        "No dar correcta disposición a los residuos generados": 8,
-        "Disposición de residuos no autorizados en clientes/particulares": 8,
-        "Conducir a exceso de velocidad > 10 km/h": 8
+        "Uso incorrecto de EPP": 8
     },
     "Calidad": {
         "Reprogramacion directo con cliente": 4,
-        "No comunica via correo si no cumple la ruta asignada": 4,
-        "No cumple en realizar servicios programados sin justificacion": 4,
-        "Certificados sin informacion o incompleta o ilegible": 6,
-        "Certificado no cumple indicaciones tecnicas": 6,
-        "No envio de informes asociados al certificado": 6,
-        "No ingresa mínimo dos recomendaciones por visita": 6,
-        "Guia de despacho sin nombre, rut y firma": 6,
-        "Reducion de la jornada y no cumplimiento de los procedimientos": 6,
-        "Falta de insumos, herramientas y/o equipos en camioneta": 6,
-        "No Utilizar ropa corporativa al iniciar la jornada": 6,
-        "No Respetar la normativa de los clientes (EPP, uso joyas)": 6,
-        "Vehiculo sucio, equipos mal almacenados": 6,
-        "Baja de Cliente asociada a mala gestión (<= 2%)": 0,
-        "Baja de Cliente asociada a mala gestión (> 2%)": 8,
-        "No usar Movil Form / Mala efectividad de llenado": 4,
-        "No notifica alarmas por Formulario o correo (1 vez)": 2,
-        "No notifica alarmas por Formulario o correo (2 vez)": 4
+        "No cumple en realizar servicios programados sin justificacion": 4
     },
     "RIOHS y Contrato": {
         "Presentación de gastos falsos en rendición": 8,
@@ -275,10 +201,6 @@ with col_logo2:
     st.markdown(f"<h4 style='text-align: center; color: {COLOR_ROJO};'>Investigación de Incidentes y KPIs</h4>", unsafe_allow_html=True)
 st.markdown("---")
 
-# ==============================================================================
-# SECCIONES DEL FORMULARIO
-# ==============================================================================
-
 st.subheader("1. Datos Generales del Incidente")
 col_c1, col_c2 = st.columns(2)
 with col_c1:
@@ -289,11 +211,10 @@ with col_c1:
     else:
         cliente_final = cliente_sel
         direccion_final = st.text_input("Dirección", DATABASE_CLIENTES[cliente_sel])
-
 with col_c2:
     fecha_incidente = st.date_input("Fecha del Incidente", datetime.date.today())
     hora_incidente = st.time_input("Hora del Incidente", st.session_state.hora_incidente_def)
-    st.session_state.hora_incidente_def = hora_incidente # Actualiza la memoria
+    st.session_state.hora_incidente_def = hora_incidente 
 
 st.markdown("---")
 
@@ -313,7 +234,7 @@ with col_p1:
 st.markdown("---")
 
 st.subheader("3. Descripción de los Hechos")
-descripcion_hechos = st.text_area("Detalle de la situación:", height=100, placeholder="Ej: Durante la inspección de rutina...")
+descripcion_hechos = st.text_area("Detalle de la situación:", height=100)
 
 st.markdown("---")
 
@@ -321,7 +242,6 @@ st.subheader("📊 4. Clasificación de la Desviación (Motor KPI)")
 col_k1, col_k2 = st.columns(2)
 with col_k1:
     tipo_area = st.selectbox("1. Seleccione Origen de la Falta", ["Área Específica (Plagas, Fumigaciones, etc.)", "Categoría General (Seguridad, Calidad, etc.)"])
-    
 with col_k2:
     if tipo_area == "Área Específica (Plagas, Fumigaciones, etc.)":
         filtro_2 = st.selectbox("2. Seleccione Área", ["Plagas", "Fumigaciones", "Rapaces", "Termitas", "Bioservicios", "Higiene"])
@@ -329,24 +249,17 @@ with col_k2:
         filtro_2 = st.selectbox("2. Seleccione Categoría General", ["Seguridad", "Calidad", "RIOHS y Contrato"])
 
 opciones_faltas = []
-if filtro_2 in DATABASE_KPI_ESTRUCTURADA:
-    opciones_faltas = list(DATABASE_KPI_ESTRUCTURADA[filtro_2].keys())
-    
+if filtro_2 in DATABASE_KPI_ESTRUCTURADA: opciones_faltas = list(DATABASE_KPI_ESTRUCTURADA[filtro_2].keys())
 faltas_seleccionadas = st.multiselect("3. Seleccione la(s) Desviación(es)", opciones_faltas)
 
 puntos_acumulados = sum([DATABASE_KPI_ESTRUCTURADA[filtro_2][f] for f in faltas_seleccionadas])
 tabla_faltas_pdf = [[filtro_2, f, str(DATABASE_KPI_ESTRUCTURADA[filtro_2][f])] for f in faltas_seleccionadas]
 
-if puntos_acumulados == 0:
-    bono_resultado, accion_kpi, color_kpi, icono = "100% Bono", "Sin Acción (OK)", "#28a745", "✅"
-elif 1 <= puntos_acumulados <= 2:
-    bono_resultado, accion_kpi, color_kpi, icono = "100% Bono", "Correo resultado final", "#ffc107", "⚠️"
-elif 3 <= puntos_acumulados <= 4:
-    bono_resultado, accion_kpi, color_kpi, icono = "80% Bono", "Correo resultado final", "#fd7e14", "⚠️"
-elif 5 <= puntos_acumulados <= 7:
-    bono_resultado, accion_kpi, color_kpi, icono = "50% Bono", "Carta amonestación (RRHH)", "#dc3545", "🚨"
-else:
-    bono_resultado, accion_kpi, color_kpi, icono = "0% Bono (Pérdida Total)", "A definir con jefatura (RRHH)", "#8b0000", "❌"
+if puntos_acumulados == 0: bono_resultado, accion_kpi, color_kpi, icono = "100% Bono", "Sin Acción (OK)", "#28a745", "✅"
+elif 1 <= puntos_acumulados <= 2: bono_resultado, accion_kpi, color_kpi, icono = "100% Bono", "Correo resultado final", "#ffc107", "⚠️"
+elif 3 <= puntos_acumulados <= 4: bono_resultado, accion_kpi, color_kpi, icono = "80% Bono", "Correo resultado final", "#fd7e14", "⚠️"
+elif 5 <= puntos_acumulados <= 7: bono_resultado, accion_kpi, color_kpi, icono = "50% Bono", "Carta amonestación (RRHH)", "#dc3545", "🚨"
+else: bono_resultado, accion_kpi, color_kpi, icono = "0% Bono (Pérdida Total)", "A definir con jefatura (RRHH)", "#8b0000", "❌"
 
 st.markdown(f"""
     <div style="background-color: white; padding: 20px; border-radius: 10px; border-left: 8px solid {color_kpi}; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-top:15px; margin-bottom:15px;">
@@ -374,8 +287,14 @@ with col_pa3: fecha_accion_inv = st.date_input("Fecha límite", datetime.date.to
 
 st.markdown("---")
 
-st.subheader("📎 7. Anexo de Evidencias")
-fotos_incidentes = st.file_uploader("Sube imágenes de evidencia (JPG, PNG)", accept_multiple_files=True, type=['png','jpg','jpeg','heic'])
+st.subheader("✍️ 7. Firma del Supervisor")
+firma_archivo = st.file_uploader("Sube imagen de la firma (JPG, PNG)", type=['png','jpg','jpeg'], key="firma")
+
+st.markdown("---")
+
+st.subheader("📎 8. Anexo de Evidencias")
+# AHORA ACEPTA PDF TAMBIÉN
+fotos_incidentes = st.file_uploader("Sube imágenes o documentos PDF de evidencia", accept_multiple_files=True, type=['png','jpg','jpeg','heic','pdf'])
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -402,7 +321,6 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
         if not tabla_faltas_pdf:
             pdf.set_font("Arial", "I", 9); pdf.cell(0, 6, "No se registraron faltas.", ln=1)
         else:
-            # Solución de desbordamiento: Usamos un formato de lista multilinea en vez de tabla rígida
             pdf.set_font("Arial", "B", 9)
             pdf.set_fill_color(0, 160, 224)
             pdf.set_text_color(255, 255, 255)
@@ -410,9 +328,7 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Arial", "", 9)
             for row in tabla_faltas_pdf:
-                # row[0]=Categoria, row[1]=Desviacion, row[2]=Puntos
-                texto_desviacion = f"[{row[0]}] {row[1]} ({row[2]} Pts)"
-                pdf.multi_cell(0, 6, f"> {texto_desviacion}", border=1)
+                pdf.multi_cell(0, 6, f"> [{row[0]}] {row[1]} ({row[2]} Pts)", border=1)
             
         pdf.ln(2); pdf.set_font("Arial", "B", 10)
         pdf.set_fill_color(240, 240, 240)
@@ -428,24 +344,26 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
         pdf.set_font("Arial", "", 9); pdf.multi_cell(0, 5, causa_raiz if causa_raiz else "N/A", border=1)
         
         pdf.t_seccion("6", "PLAN DE ACCION (MEDIDAS CORRECTIVAS)")
-        # Solución de desbordamiento: Diseño vertical/bloques en vez de tabla
-        pdf.set_font("Arial", "B", 9)
-        pdf.cell(40, 6, "Responsable:", border=1)
-        pdf.set_font("Arial", "", 9)
-        pdf.cell(150, 6, responsable_inv if responsable_inv else "No asignado", border=1, ln=1)
+        pdf.set_font("Arial", "B", 9); pdf.cell(40, 6, "Responsable:", border=1)
+        pdf.set_font("Arial", "", 9); pdf.cell(150, 6, responsable_inv if responsable_inv else "No asignado", border=1, ln=1)
+        pdf.set_font("Arial", "B", 9); pdf.cell(40, 6, "Fecha Limite:", border=1)
+        pdf.set_font("Arial", "", 9); pdf.cell(150, 6, str(fecha_accion_inv), border=1, ln=1)
+        pdf.set_font("Arial", "B", 9); pdf.cell(0, 6, "Accion Correctiva a Implementar:", border=1, ln=1, fill=True)
+        pdf.set_font("Arial", "", 9); pdf.multi_cell(0, 6, accion_inv if accion_inv else "Sin acciones registradas.", border=1)
         
-        pdf.set_font("Arial", "B", 9)
-        pdf.cell(40, 6, "Fecha Limite:", border=1)
-        pdf.set_font("Arial", "", 9)
-        pdf.cell(150, 6, str(fecha_accion_inv), border=1, ln=1)
-        
-        pdf.set_font("Arial", "B", 9)
-        pdf.cell(0, 6, "Accion Correctiva a Implementar:", border=1, ln=1, fill=True)
-        pdf.set_font("Arial", "", 9)
-        pdf.multi_cell(0, 6, accion_inv if accion_inv else "Sin acciones registradas.", border=1)
+        # --- NUEVA SECCIÓN DE FIRMA ---
+        if firma_archivo:
+            pdf.t_seccion("7", "FIRMA DEL SUPERVISOR")
+            tmp_firma, _, _ = procesar_archivo_evidencia(firma_archivo)
+            if tmp_firma:
+                # Calculamos el espacio para centrar la firma
+                x_firma = (210 - 50) / 2 # 210mm es el ancho de A4, firma de 50mm
+                pdf.image(tmp_firma, x=x_firma, y=pdf.get_y(), w=50)
+                pdf.ln(40) # Dar espacio hacia abajo
+                os.remove(tmp_firma)
         
         if fotos_incidentes:
-            pdf.t_seccion("7", "EVIDENCIA FOTOGRAFICA")
+            pdf.t_seccion("8", "EVIDENCIA FOTOGRAFICA Y DOCUMENTAL")
             pdf.galeria(fotos_incidentes)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
