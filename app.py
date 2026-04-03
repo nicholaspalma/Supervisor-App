@@ -1,5 +1,17 @@
 import streamlit as st
 import datetime
+import os
+import tempfile
+import gc
+from fpdf import FPDF
+from PIL import Image, ImageOps
+
+# --- SOPORTE HEIC (Para fotos de iPhone) ---
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    pass
 
 # ==============================================================================
 # CONFIGURACIÓN INICIAL Y TEMA CORPORATIVO
@@ -27,8 +39,83 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
+# Memoria de estado para la hora y el PDF
+if "hora_incidente_def" not in st.session_state:
+    st.session_state.hora_incidente_def = datetime.datetime.now().time()
+if "pdf_supervision" not in st.session_state:
+    st.session_state.pdf_supervision = None
+
 # ==============================================================================
-# BASES DE DATOS (CLIENTES, PERSONAL Y KPIs)
+# FUNCIONES PARA IMÁGENES Y PDF
+# ==============================================================================
+def procesar_imagen_full(uploaded_file):
+    try:
+        uploaded_file.seek(0)
+        image = Image.open(uploaded_file)
+        image = ImageOps.exif_transpose(image)
+        if image.mode != 'RGB': image = image.convert('RGB')
+        if image.width > 1600 or image.height > 1600:
+            image.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+        w, h = image.size
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+        image.save(tmp.name, format='JPEG', quality=85, optimize=True)
+        image.close(); del image; gc.collect()
+        return tmp.name, w, h
+    except: return None, 0, 0
+
+class SupervisionPDF(FPDF):
+    def header(self):
+        if os.path.exists('logo.png'):
+            try: self.image('logo.png', 10, 8, 33)
+            except: pass
+        self.set_font("Arial", "B", 14)
+        self.set_text_color(0, 43, 73) # AZUL OSCURO
+        self.cell(0, 8, "INFORME DE INVESTIGACION Y KPI", ln=1, align="R")
+        self.set_font("Arial", "I", 8)
+        self.set_text_color(100, 100, 100)
+        self.cell(0, 5, "RENTOKIL INITIAL CHILE SPA - SUPERVISION", ln=1, align="R")
+        self.ln(10)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font("Arial", "I", 8)
+        self.set_text_color(150, 150, 150)
+        self.cell(0, 10, f"Pagina {self.page_no()} - Documento Confidencial", align="C")
+
+    def t_seccion(self, numero, texto):
+        self.ln(5)
+        self.set_font("Arial", "B", 10)
+        self.set_fill_color(0, 160, 224) # CELESTE
+        self.set_text_color(255, 255, 255)
+        self.cell(0, 7, f"  {numero}. {texto.upper()}", ln=1, fill=True)
+        self.set_text_color(0, 0, 0)
+        self.ln(2)
+
+    def tabla(self, header, data, widths):
+        self.set_font("Arial", "B", 8)
+        self.set_fill_color(220, 220, 220)
+        for i, h in enumerate(header): self.cell(widths[i], 8, h, 1, 0, 'C', True)
+        self.ln()
+        self.set_font("Arial", "", 8)
+        self.set_fill_color(255, 255, 255)
+        for row in data:
+            for i, d in enumerate(row): self.cell(widths[i], 6, str(d), 1, 0, 'C', True)
+            self.ln()
+
+    def galeria(self, fotos):
+        if not fotos: return
+        for i, f in enumerate(fotos):
+            tmp, w, h = procesar_imagen_full(f)
+            if tmp:
+                if self.get_y() > 210: self.add_page(); self.set_y(45); i_mod = 0
+                else: i_mod = i % 2
+                if i_mod == 0: y_act = self.get_y(); self.image(tmp, x=10, y=y_act, w=90, h=65)
+                else: self.image(tmp, x=110, y=y_act, w=90, h=65); self.ln(70)
+                os.remove(tmp)
+        if len(fotos) % 2 != 0: self.ln(70)
+
+# ==============================================================================
+# BASES DE DATOS
 # ==============================================================================
 DATABASE_CLIENTES = {
     "AGROCOMMERCE": "Av. José Miguel Infante 8745, Renca, Región Metropolitana",
@@ -84,6 +171,7 @@ DATABASE_PERSONAL = {
     "OTRO": {"rut": "", "cargo": ""}
 }
 
+# --- REEMPLAZA LOS TEXTOS DE RELLENO CON LOS DE TU EXCEL ---
 DATABASE_KPI_ESTRUCTURADA = {
     "Plagas": {
         "Servicio desinsectacion sin señaletica calavera, medidas preventivas en el mes": 8,
@@ -111,6 +199,18 @@ DATABASE_KPI_ESTRUCTURADA = {
         "Mantencion desprolija de dispositivos de control de aves (durante el mes)": 4,
         "Mantencion desprolija de dispositivos de control de aves (por 2 vez)": 8
     },
+    "Termitas": {
+        "[RELLENO] Falta leve Termitas": 4,
+        "[RELLENO] Falta grave Termitas": 8
+    },
+    "Bioservicios": {
+        "[RELLENO] Falta leve Bioservicios": 4,
+        "[RELLENO] Falta grave Bioservicios": 8
+    },
+    "Higiene": {
+        "[RELLENO] Falta leve Higiene": 4,
+        "[RELLENO] Falta grave Higiene": 8
+    },
     "Seguridad": {
         "No realiza Check List de Vehículos durante el mes": 8,
         "Tener accidentes de responsabilidad directa": 8,
@@ -124,9 +224,7 @@ DATABASE_KPI_ESTRUCTURADA = {
         "Conducir a exceso de velocidad 6 a 9 km/h (1 min)": 8,
         "No dar correcta disposición a los residuos generados": 8,
         "Disposición de residuos no autorizados en clientes/particulares": 8,
-        "Conducir a exceso de velocidad > 10 km/h": 8,
-        "Reclamo de cliente asociado a mala gestión/calidad/puntualidad (durante el mes)": 4,
-        "Reclamo de cliente asociado a mala gestión/calidad/puntualidad (2 vez)": 8
+        "Conducir a exceso de velocidad > 10 km/h": 8
     },
     "Calidad": {
         "Reprogramacion directo con cliente": 4,
@@ -147,6 +245,10 @@ DATABASE_KPI_ESTRUCTURADA = {
         "No usar Movil Form / Mala efectividad de llenado": 4,
         "No notifica alarmas por Formulario o correo (1 vez)": 2,
         "No notifica alarmas por Formulario o correo (2 vez)": 4
+    },
+    "RIOHS y Contrato": {
+        "[RELLENO] Infracción al Reglamento Interno (Leve)": 4,
+        "[RELLENO] Infracción al Reglamento Interno (Grave)": 8
     }
 }
 
@@ -163,7 +265,6 @@ st.markdown("---")
 # SECCIONES DEL FORMULARIO
 # ==============================================================================
 
-# --- 1. DATOS GENERALES ---
 st.subheader("1. Datos Generales del Incidente")
 col_c1, col_c2 = st.columns(2)
 with col_c1:
@@ -173,15 +274,15 @@ with col_c1:
         direccion_final = st.text_input("Ingrese Dirección manualmente:")
     else:
         cliente_final = cliente_sel
-        direccion_final = st.text_input("Dirección (Auto-completada)", DATABASE_CLIENTES[cliente_sel])
+        direccion_final = st.text_input("Dirección", DATABASE_CLIENTES[cliente_sel])
 
 with col_c2:
     fecha_incidente = st.date_input("Fecha del Incidente", datetime.date.today())
-    hora_incidente = st.time_input("Hora del Incidente", datetime.datetime.now().time())
+    hora_incidente = st.time_input("Hora del Incidente", st.session_state.hora_incidente_def)
+    st.session_state.hora_incidente_def = hora_incidente # Actualiza la memoria
 
 st.markdown("---")
 
-# --- 2. PERSONAL INVOLUCRADO ---
 st.subheader("2. Personal Involucrado (Evaluado)")
 col_p1, col_p2, col_p3 = st.columns(3)
 with col_p1:
@@ -197,17 +298,12 @@ with col_p1:
 
 st.markdown("---")
 
-# --- 3. DESCRIPCIÓN DE LOS HECHOS ---
 st.subheader("3. Descripción de los Hechos")
-st.markdown("Registre la declaración del técnico o el relato objetivo de la desviación encontrada.")
-descripcion_hechos = st.text_area("Detalle de la situación:", height=150, placeholder="Ej: Durante la inspección de rutina, se detectó que el técnico...")
+descripcion_hechos = st.text_area("Detalle de la situación:", height=100, placeholder="Ej: Durante la inspección de rutina...")
 
 st.markdown("---")
 
-# --- 4. MOTOR KPI ---
 st.subheader("📊 4. Clasificación de la Desviación (Motor KPI)")
-st.markdown("Seleccione el Área/Categoría para desplegar las faltas. **Puede seleccionar múltiples faltas.**")
-
 col_k1, col_k2 = st.columns(2)
 with col_k1:
     tipo_area = st.selectbox("1. Seleccione Origen de la Falta", ["Área Específica (Plagas, Fumigaciones, etc.)", "Categoría General (Seguridad, Calidad, etc.)"])
@@ -222,38 +318,21 @@ opciones_faltas = []
 if filtro_2 in DATABASE_KPI_ESTRUCTURADA:
     opciones_faltas = list(DATABASE_KPI_ESTRUCTURADA[filtro_2].keys())
     
-faltas_seleccionadas = st.multiselect("3. Seleccione la(s) Desviación(es) Cometida(s)", opciones_faltas)
+faltas_seleccionadas = st.multiselect("3. Seleccione la(s) Desviación(es)", opciones_faltas)
 
-# Cálculo matemático del bono
-puntos_acumulados = 0
-for falta in faltas_seleccionadas:
-    puntos_acumulados += DATABASE_KPI_ESTRUCTURADA[filtro_2][falta]
+puntos_acumulados = sum([DATABASE_KPI_ESTRUCTURADA[filtro_2][f] for f in faltas_seleccionadas])
+tabla_faltas_pdf = [[filtro_2, f, str(DATABASE_KPI_ESTRUCTURADA[filtro_2][f])] for f in faltas_seleccionadas]
 
 if puntos_acumulados == 0:
-    bono_resultado = "100% Bono"
-    accion_kpi = "Sin Acción (OK)"
-    color_kpi = "#28a745" # Verde
-    icono = "✅"
+    bono_resultado, accion_kpi, color_kpi, icono = "100% Bono", "Sin Acción (OK)", "#28a745", "✅"
 elif 1 <= puntos_acumulados <= 2:
-    bono_resultado = "100% Bono"
-    accion_kpi = "Correo resultado final"
-    color_kpi = "#ffc107" # Amarillo
-    icono = "⚠️"
+    bono_resultado, accion_kpi, color_kpi, icono = "100% Bono", "Correo resultado final", "#ffc107", "⚠️"
 elif 3 <= puntos_acumulados <= 4:
-    bono_resultado = "80% Bono"
-    accion_kpi = "Correo resultado final"
-    color_kpi = "#fd7e14" # Naranja
-    icono = "⚠️"
+    bono_resultado, accion_kpi, color_kpi, icono = "80% Bono", "Correo resultado final", "#fd7e14", "⚠️"
 elif 5 <= puntos_acumulados <= 7:
-    bono_resultado = "50% Bono"
-    accion_kpi = "Carta amonestación (RRHH)"
-    color_kpi = "#dc3545" # Rojo
-    icono = "🚨"
-else: # 8 o más
-    bono_resultado = "0% Bono (Pérdida Total)"
-    accion_kpi = "A definir con jefatura (RRHH)"
-    color_kpi = "#8b0000" # Rojo oscuro
-    icono = "❌"
+    bono_resultado, accion_kpi, color_kpi, icono = "50% Bono", "Carta amonestación (RRHH)", "#dc3545", "🚨"
+else:
+    bono_resultado, accion_kpi, color_kpi, icono = "0% Bono (Pérdida Total)", "A definir con jefatura (RRHH)", "#8b0000", "❌"
 
 st.markdown(f"""
     <div style="background-color: white; padding: 20px; border-radius: 10px; border-left: 8px solid {color_kpi}; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-top:15px; margin-bottom:15px;">
@@ -266,34 +345,84 @@ st.markdown(f"""
 
 st.markdown("---")
 
-# --- 5. ANÁLISIS DE CAUSAS ---
 st.subheader("🔍 5. Análisis de Causas")
 col_c1, col_c2 = st.columns(2)
-with col_c1:
-    causa_inmediata = st.text_area("Causas Inmediatas (Acciones/Condiciones Subestándares)", height=100)
-with col_c2:
-    causa_raiz = st.text_area("Causas Raíz (Factores Personales/Trabajo)", height=100)
+with col_c1: causa_inmediata = st.text_area("Causas Inmediatas (Acciones Subestándares)", height=100)
+with col_c2: causa_raiz = st.text_area("Causas Raíz (Factores Personales/Trabajo)", height=100)
 
 st.markdown("---")
 
-# --- 6. PLAN DE ACCIÓN ---
 st.subheader("✅ 6. Plan de Acción (Medidas Correctivas)")
 col_pa1, col_pa2, col_pa3 = st.columns(3)
-with col_pa1:
-    accion_inv = st.text_area("Acción Correctiva a Implementar", height=68)
-with col_pa2:
-    responsable_inv = st.text_input("Responsable de ejecución (Supervisor/Técnico)")
-with col_pa3:
-    fecha_accion_inv = st.date_input("Fecha límite de Cumplimiento", datetime.date.today() + datetime.timedelta(days=7))
+with col_pa1: accion_inv = st.text_area("Acción Correctiva", height=68)
+with col_pa2: responsable_inv = st.text_input("Responsable de ejecución")
+with col_pa3: fecha_accion_inv = st.date_input("Fecha límite", datetime.date.today() + datetime.timedelta(days=7))
 
 st.markdown("---")
 
-# --- 7. EVIDENCIAS ---
 st.subheader("📎 7. Anexo de Evidencias")
-fotos_incidentes = st.file_uploader("Sube fotos o archivos (Imágenes, PDF, etc.)", accept_multiple_files=True, type=['png','jpg','jpeg','heic','pdf','docx'])
+fotos_incidentes = st.file_uploader("Sube imágenes de evidencia (JPG, PNG)", accept_multiple_files=True, type=['png','jpg','jpeg','heic'])
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- BOTÓN FINAL ---
-if st.button("🚀 GUARDAR Y GENERAR REPORTE", use_container_width=True, type="primary"):
-    st.success("¡Formulario completado! (La generación de PDF se conectará en el próximo paso).")
+# ==============================================================================
+# GENERADOR DE PDF
+# ==============================================================================
+if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, type="primary"):
+    try:
+        pdf = SupervisionPDF()
+        pdf.add_page()
+        
+        pdf.t_seccion("1", "DATOS GENERALES DEL INCIDENTE")
+        pdf.tabla(["Cliente / Razon Social", "Direccion"], [[cliente_final, direccion_final]], [95, 95])
+        pdf.tabla(["Fecha", "Hora"], [[str(fecha_incidente), hora_incidente.strftime("%H:%M")]], [95, 95])
+        
+        pdf.t_seccion("2", "PERSONAL INVOLUCRADO")
+        pdf.tabla(["Nombre", "RUT", "Cargo / Funcion"], [[nombre_personal, rut_personal, cargo_personal]], [70, 40, 80])
+        
+        pdf.t_seccion("3", "DESCRIPCION DE LOS HECHOS")
+        pdf.set_font("Arial", "", 9)
+        pdf.multi_cell(0, 6, descripcion_hechos if descripcion_hechos else "Sin descripcion registrada.", border=1)
+        
+        pdf.t_seccion("4", "EVALUACION KPI Y PENALIZACIONES")
+        if not tabla_faltas_pdf:
+            pdf.set_font("Arial", "I", 9); pdf.cell(0, 6, "No se registraron faltas.", ln=1)
+        else:
+            pdf.tabla(["Categoria", "Desviacion Detectada", "Pts"], tabla_faltas_pdf, [40, 130, 20])
+            
+        pdf.ln(2); pdf.set_font("Arial", "B", 10)
+        pdf.cell(100, 6, f"PUNTAJE TOTAL: {puntos_acumulados} Pts", border=1)
+        pdf.cell(90, 6, f"RESULTADO BONO: {bono_resultado}", border=1, ln=1)
+        pdf.cell(190, 6, f"ACCION: {accion_kpi}", border=1, ln=1)
+        
+        pdf.t_seccion("5", "ANALISIS DE CAUSAS")
+        pdf.set_font("Arial", "B", 9); pdf.cell(0, 6, "Causas Inmediatas:", ln=1)
+        pdf.set_font("Arial", "", 9); pdf.multi_cell(0, 5, causa_inmediata if causa_inmediata else "N/A", border=1)
+        pdf.ln(2)
+        pdf.set_font("Arial", "B", 9); pdf.cell(0, 6, "Causas Raiz:", ln=1)
+        pdf.set_font("Arial", "", 9); pdf.multi_cell(0, 5, causa_raiz if causa_raiz else "N/A", border=1)
+        
+        pdf.t_seccion("6", "PLAN DE ACCION (MEDIDAS CORRECTIVAS)")
+        pdf.tabla(["Accion Correctiva", "Responsable", "Fecha Limite"], [[accion_inv, responsable_inv, str(fecha_accion_inv)]], [100, 50, 40])
+        
+        if fotos_incidentes:
+            pdf.t_seccion("7", "EVIDENCIA FOTOGRAFICA")
+            pdf.galeria(fotos_incidentes)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+            pdf.output(tmp_pdf.name)
+            with open(tmp_pdf.name, "rb") as f:
+                st.session_state.pdf_supervision = f.read()
+                
+    except Exception as e:
+        st.error(f"Error generando el PDF: {e}")
+
+if st.session_state.pdf_supervision is not None:
+    st.success("✅ Reporte Generado Exitosamente")
+    st.download_button(
+        label="📄 DESCARGAR INFORME DE SUPERVISIÓN (PDF)",
+        data=st.session_state.pdf_supervision,
+        file_name="Informe_Supervision_Rentokil.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )
