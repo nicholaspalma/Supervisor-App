@@ -18,6 +18,8 @@ except ImportError:
 # ==============================================================================
 st.set_page_config(layout="wide", page_title="Rentokil - Panel de Supervisión")
 
+# Nuevos colores solicitados
+COLOR_ROJO = "#CC0000"
 COLOR_CELESTE = "#00A0E0"
 COLOR_AZUL_OSCURO = "#002B49"
 
@@ -25,10 +27,10 @@ st.markdown(f"""
     <style>
     .stApp header {{background-color: transparent;}}
     h1, h2, h3, h4 {{color: {COLOR_AZUL_OSCURO};}}
-    div[data-testid="stForm"] {{ border: 2px solid {COLOR_CELESTE}; border-radius: 10px; padding: 20px; }}
+    div[data-testid="stForm"] {{ border: 2px solid {COLOR_ROJO}; border-radius: 10px; padding: 20px; }}
     button[kind="primary"] {{
-        background-color: {COLOR_CELESTE} !important;
-        border-color: {COLOR_CELESTE} !important;
+        background-color: {COLOR_ROJO} !important;
+        border-color: {COLOR_ROJO} !important;
         color: white !important;
         font-weight: bold !important;
     }}
@@ -65,6 +67,7 @@ def procesar_imagen_full(uploaded_file):
 
 class SupervisionPDF(FPDF):
     def header(self):
+        # Busca el logo en la misma carpeta que el script
         if os.path.exists('logo.png'):
             try: self.image('logo.png', 10, 8, 33)
             except: pass
@@ -85,7 +88,7 @@ class SupervisionPDF(FPDF):
     def t_seccion(self, numero, texto):
         self.ln(5)
         self.set_font("Arial", "B", 10)
-        self.set_fill_color(0, 160, 224) # CELESTE
+        self.set_fill_color(204, 0, 0) # ROJO para áreas principales
         self.set_text_color(255, 255, 255)
         self.cell(0, 7, f"  {numero}. {texto.upper()}", ln=1, fill=True)
         self.set_text_color(0, 0, 0)
@@ -93,11 +96,13 @@ class SupervisionPDF(FPDF):
 
     def tabla(self, header, data, widths):
         self.set_font("Arial", "B", 8)
-        self.set_fill_color(220, 220, 220)
+        self.set_fill_color(0, 160, 224) # CELESTE para encabezados de tabla
+        self.set_text_color(255, 255, 255)
         for i, h in enumerate(header): self.cell(widths[i], 8, h, 1, 0, 'C', True)
         self.ln()
         self.set_font("Arial", "", 8)
-        self.set_fill_color(255, 255, 255)
+        self.set_text_color(0, 0, 0)
+        self.set_fill_color(240, 248, 255) # Fondo muy suave
         for row in data:
             for i, d in enumerate(row): self.cell(widths[i], 6, str(d), 1, 0, 'C', True)
             self.ln()
@@ -171,7 +176,7 @@ DATABASE_PERSONAL = {
     "OTRO": {"rut": "", "cargo": ""}
 }
 
-# --- REEMPLAZA LOS TEXTOS DE RELLENO CON LOS DE TU EXCEL ---
+# --- BASE DE DATOS ACTUALIZADA CON RIOHS Y CONTRATO ---
 DATABASE_KPI_ESTRUCTURADA = {
     "Plagas": {
         "Servicio desinsectacion sin señaletica calavera, medidas preventivas en el mes": 8,
@@ -247,8 +252,17 @@ DATABASE_KPI_ESTRUCTURADA = {
         "No notifica alarmas por Formulario o correo (2 vez)": 4
     },
     "RIOHS y Contrato": {
-        "[RELLENO] Infracción al Reglamento Interno (Leve)": 4,
-        "[RELLENO] Infracción al Reglamento Interno (Grave)": 8
+        "Presentación de gastos falsos en rendición": 8,
+        "Adulterar, falsificar, modificar de cualquier forma o Firmar a nombre de otra persona sin autorizacion un documento, certificado etc": 8,
+        "Conducir vehiculo de la compañia sin su licencia de conducir al dia o incumplir norma del transito": 8,
+        "Emplear la máxima diligencia en el cuidado de las maquinarias, vehículos, materiales y materias primas de todo tipo y, en general, de todos los bienes": 8,
+        "Cumplir con los registros de entrada y salidas por medio del sotware digital dispuesto para ello.": 8,
+        "Uso de vehiculo corporativo para uso personales o en horarios no asociados a sus labores sin una autorizacion formal de su jefatura": 8,
+        "Prestar servicios a terceros en funciones similares o del mismo giro de la empresa durante el período del contrato": 8,
+        "Adulterar firma de servicio o cualquier aspecto de algun documento": 8,
+        "No participar de las actividades de capacitacion tecnicas y de seguridad": 8,
+        "Dar correcta disposición a los residuos generados por las actividades desarrolladas por la compañía, ya sean residuos industriales, domésticos, reciclables y/o peligrosos.": 8,
+        "Faltar el respeto a compañeros. Jefatura y Clientes": 8
     }
 }
 
@@ -258,7 +272,7 @@ DATABASE_KPI_ESTRUCTURADA = {
 col_logo1, col_logo2, col_logo3 = st.columns([1,2,1])
 with col_logo2:
     st.markdown(f"<h1 style='text-align: center; color: {COLOR_AZUL_OSCURO};'>🛡️ Portal de Supervisión</h1>", unsafe_allow_html=True)
-    st.markdown(f"<h4 style='text-align: center; color: {COLOR_CELESTE};'>Investigación de Incidentes y KPIs</h4>", unsafe_allow_html=True)
+    st.markdown(f"<h4 style='text-align: center; color: {COLOR_ROJO};'>Investigación de Incidentes y KPIs</h4>", unsafe_allow_html=True)
 st.markdown("---")
 
 # ==============================================================================
@@ -388,12 +402,23 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
         if not tabla_faltas_pdf:
             pdf.set_font("Arial", "I", 9); pdf.cell(0, 6, "No se registraron faltas.", ln=1)
         else:
-            pdf.tabla(["Categoria", "Desviacion Detectada", "Pts"], tabla_faltas_pdf, [40, 130, 20])
+            # Solución de desbordamiento: Usamos un formato de lista multilinea en vez de tabla rígida
+            pdf.set_font("Arial", "B", 9)
+            pdf.set_fill_color(0, 160, 224)
+            pdf.set_text_color(255, 255, 255)
+            pdf.cell(0, 6, "  Desviaciones Registradas:", border=1, ln=1, fill=True)
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_font("Arial", "", 9)
+            for row in tabla_faltas_pdf:
+                # row[0]=Categoria, row[1]=Desviacion, row[2]=Puntos
+                texto_desviacion = f"[{row[0]}] {row[1]} ({row[2]} Pts)"
+                pdf.multi_cell(0, 6, f"> {texto_desviacion}", border=1)
             
         pdf.ln(2); pdf.set_font("Arial", "B", 10)
-        pdf.cell(100, 6, f"PUNTAJE TOTAL: {puntos_acumulados} Pts", border=1)
-        pdf.cell(90, 6, f"RESULTADO BONO: {bono_resultado}", border=1, ln=1)
-        pdf.cell(190, 6, f"ACCION: {accion_kpi}", border=1, ln=1)
+        pdf.set_fill_color(240, 240, 240)
+        pdf.cell(100, 6, f"PUNTAJE TOTAL: {puntos_acumulados} Pts", border=1, fill=True)
+        pdf.cell(90, 6, f"RESULTADO BONO: {bono_resultado}", border=1, ln=1, fill=True)
+        pdf.cell(190, 6, f"ACCION: {accion_kpi}", border=1, ln=1, fill=True)
         
         pdf.t_seccion("5", "ANALISIS DE CAUSAS")
         pdf.set_font("Arial", "B", 9); pdf.cell(0, 6, "Causas Inmediatas:", ln=1)
@@ -403,7 +428,21 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
         pdf.set_font("Arial", "", 9); pdf.multi_cell(0, 5, causa_raiz if causa_raiz else "N/A", border=1)
         
         pdf.t_seccion("6", "PLAN DE ACCION (MEDIDAS CORRECTIVAS)")
-        pdf.tabla(["Accion Correctiva", "Responsable", "Fecha Limite"], [[accion_inv, responsable_inv, str(fecha_accion_inv)]], [100, 50, 40])
+        # Solución de desbordamiento: Diseño vertical/bloques en vez de tabla
+        pdf.set_font("Arial", "B", 9)
+        pdf.cell(40, 6, "Responsable:", border=1)
+        pdf.set_font("Arial", "", 9)
+        pdf.cell(150, 6, responsable_inv if responsable_inv else "No asignado", border=1, ln=1)
+        
+        pdf.set_font("Arial", "B", 9)
+        pdf.cell(40, 6, "Fecha Limite:", border=1)
+        pdf.set_font("Arial", "", 9)
+        pdf.cell(150, 6, str(fecha_accion_inv), border=1, ln=1)
+        
+        pdf.set_font("Arial", "B", 9)
+        pdf.cell(0, 6, "Accion Correctiva a Implementar:", border=1, ln=1, fill=True)
+        pdf.set_font("Arial", "", 9)
+        pdf.multi_cell(0, 6, accion_inv if accion_inv else "Sin acciones registradas.", border=1)
         
         if fotos_incidentes:
             pdf.t_seccion("7", "EVIDENCIA FOTOGRAFICA")
