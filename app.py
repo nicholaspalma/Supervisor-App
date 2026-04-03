@@ -4,7 +4,7 @@ import os
 import tempfile
 import gc
 import io
-import fitz  # Esta es la librería mágica PyMuPDF
+import fitz  # PyMuPDF
 from fpdf import FPDF
 from PIL import Image, ImageOps
 
@@ -29,7 +29,7 @@ st.markdown(f"""
     .stApp header {{background-color: transparent;}}
     h1, h2, h3, h4 {{color: {COLOR_AZUL_OSCURO};}}
     div[data-testid="stForm"] {{ border: 2px solid {COLOR_ROJO}; border-radius: 10px; padding: 20px; }}
-    button[kind="primary"] {{ background-color: {COLOR_ROJO} !important; border-color: {COLOR_ROJO} !important; color: white !important; font-weight: bold !important; }}
+    button[kind="primary"] {{ background-color: {COLOR_ROJO} !important; border-color: {COLOR_ROJO} !important; color: white !important; font-weight: bold !important; border-radius: 8px; }}
     button[kind="primary"]:hover {{ background-color: {COLOR_AZUL_OSCURO} !important; border-color: {COLOR_AZUL_OSCURO} !important; }}
     </style>
 """, unsafe_allow_html=True)
@@ -41,25 +41,21 @@ if "pdf_supervision" not in st.session_state: st.session_state.pdf_supervision =
 # FUNCIONES PARA IMÁGENES Y PDF
 # ==============================================================================
 def procesar_archivo_evidencia(uploaded_file):
-    """Procesa tanto imágenes normales como la primera página de un PDF"""
     try:
         uploaded_file.seek(0)
         file_bytes = uploaded_file.read()
         
-        # Si es un PDF, extraemos la primera página como imagen
         if uploaded_file.name.lower().endswith('.pdf'):
             doc = fitz.open("pdf", file_bytes)
             page = doc.load_page(0)
-            pix = page.get_pixmap(dpi=150) # Calidad de la imagen
+            pix = page.get_pixmap(dpi=150)
             image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             doc.close()
         else:
-            # Si es imagen normal
             image = Image.open(io.BytesIO(file_bytes))
             image = ImageOps.exif_transpose(image)
             if image.mode != 'RGB': image = image.convert('RGB')
             
-        # Redimensionar para no saturar el PDF final
         if image.width > 1600 or image.height > 1600:
             image.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
             
@@ -73,6 +69,11 @@ def procesar_archivo_evidencia(uploaded_file):
         return None, 0, 0
 
 class SupervisionPDF(FPDF):
+    def __init__(self):
+        super().__init__()
+        # Configurar color de borde general a un gris suave (Moderno)
+        self.set_draw_color(220, 220, 220)
+
     def header(self):
         if os.path.exists('logo.png'):
             try: self.image('logo.png', 10, 8, 33)
@@ -92,25 +93,27 @@ class SupervisionPDF(FPDF):
         self.cell(0, 10, f"Pagina {self.page_no()} - Documento Confidencial", align="C")
 
     def t_seccion(self, numero, texto):
-        self.ln(5)
+        self.ln(6)
         self.set_font("Arial", "B", 10)
-        self.set_fill_color(204, 0, 0)
-        self.set_text_color(255, 255, 255)
-        self.cell(0, 7, f"  {numero}. {texto.upper()}", ln=1, fill=True)
+        self.set_fill_color(204, 0, 0) # ROJO
+        self.set_text_color(255, 255, 255) # BLANCO
+        self.cell(0, 8, f"  {numero}. {texto.upper()}", ln=1, fill=True, border=0)
         self.set_text_color(0, 0, 0)
         self.ln(2)
 
     def tabla(self, header, data, widths):
         self.set_font("Arial", "B", 8)
-        self.set_fill_color(0, 160, 224)
-        self.set_text_color(255, 255, 255)
-        for i, h in enumerate(header): self.cell(widths[i], 8, h, 1, 0, 'C', True)
+        self.set_fill_color(0, 160, 224) # CELESTE
+        self.set_text_color(255, 255, 255) # BLANCO
+        for i, h in enumerate(header): 
+            self.cell(widths[i], 8, h, 1, 0, 'C', True)
         self.ln()
         self.set_font("Arial", "", 8)
         self.set_text_color(0, 0, 0)
-        self.set_fill_color(240, 248, 255)
+        self.set_fill_color(248, 249, 250) # Fondo de fila super claro
         for row in data:
-            for i, d in enumerate(row): self.cell(widths[i], 6, str(d), 1, 0, 'C', True)
+            for i, d in enumerate(row): 
+                self.cell(widths[i], 7, str(d), 1, 0, 'C', True)
             self.ln()
 
     def galeria(self, fotos):
@@ -126,19 +129,83 @@ class SupervisionPDF(FPDF):
         if len(fotos) % 2 != 0: self.ln(70)
 
 # ==============================================================================
-# BASES DE DATOS ACTUALIZADAS
+# BASES DE DATOS RESTAURADAS AL 100%
 # ==============================================================================
-DATABASE_CLIENTES = {"AGROCOMMERCE": "Av. José Miguel Infante 8745, Renca", "TUCAPEL CD": "VOLCAN LINCABUR 435, PUDAHUEL", "OTRO": ""}
-DATABASE_PERSONAL = {"Marcos Escobar": {"rut": "8.546.549-K", "cargo": "Técnico"}, "Carlos Narbona": {"rut": "20.121.067-K", "cargo": "Representante Técnico"}, "OTRO": {"rut": "", "cargo": ""}}
+DATABASE_CLIENTES = {
+    "AGROCOMMERCE": "Av. José Miguel Infante 8745, Renca, Región Metropolitana",
+    "TUCAPEL CD": "VOLCAN LINCABUR 435, PUDAHUEL",
+    "ECONUT PARCELA 30": "18 SEPT, Paine",
+    "CV TRADING": "CAMINO VALDIVIA DE PAINE S/N BUIN",
+    "CALBU BUIN": "La Estancilla 8991, Buin, Región Metropolitana",
+    "LA PINTANA": "Lautaro 2260, La Pintana",
+    "PUENTE VERDE": "Avenida Puente Verde 2080, Quilicura",
+    "FINE FRUITS": "PAULA JARAQUEMADA, PAINE",
+    "STARFOOD": "Bernardo O'Higgins 150, 9361274 Colina, Región Metropolitana",
+    "TUCAPEL STGO CENTRO": "Tucapel 3140, Santiago, Bodega 10 PNC",
+    "MALTEXCO": "Bellavista 681, 9680086 Talagante, Región Metropolitana, Chile",
+    "NAMA": "Cam. Bernardo O'Higgins 20137, Pudahuel, Región Metropolitana, Chile",
+    "PRUNESCO": "RAMON SUBERCASEUX 2712, Pirque, Chile",
+    "WALMART": "Av. El Parque 1000, Pudahuel, Región Metropolitana",
+    "LA INVERNADA": "CAMINO SAN MIGUEL PARC 2 PAINE",
+    "AGROCOMMERCE LOGINSA": "LO SIERRA 04460 SAN BDO",
+    "PACKING MERQUEN": "PANAM. SUR KM. 40 , PAINE",
+    "CHOROMBO": "CAMINO PUBLICO CASABLANCA KM. 22, MARIA PINTO",
+    "MOLINO PUENTE ALTO": "BALMACEDA 27 PTE ALTO",
+    "VITAKAI": "CAMINO STA. CECILIA PARC SAN EDO., EL MONTE",
+    "DAFF": "PANAM. NORTE 16950 LAMPA",
+    "CRAMER": "BALMACEDA 3050 PEÑAFLOR",
+    "LA TAPERA": "SAN MIGUEL DE LIRAY PARCELA 16 Y 17 COLINA",
+    "GROWEX": "CAMINO LAS PARCELAS 21 ISLA DE MAIPO",
+    "BALMACEDA": "BALMACEDA 1726 STGO",
+    "GOOD FOOD": "BALMACEDA 3050 PEÑAFLOR",
+    "KIOSCLUB": "JUAN ELIAS 1701 RECOLETA",
+    "PRODALMEN": "FUNDO CHALLAY ALTO, HUELQUEN, PAINE",
+    "DEGESCH": "JOSE LUIS CARO 1321, PADRE HURTADO",
+    "CAROZZI NOS": "LONGITUDINAL SUR 5201, NOS",
+    "MSC MAIPU": "AV. PAJARITOS 1061 MAIPU",
+    "MOLINO EXPOSICION": "AV. EXPOSICION 1657 EST CENTRAL",
+    "MOLINO BALMACEDA": "BALMACEDA 1726 STGO",
+    "MSC EXPOSICION": "AV. EXPOSICION 1657 EST CENTRAL",
+    "TALLER GAMMA": "Mapocho # 4573, Quinta Normal.",
+    "CAMPO ANDINO": "CAMINO EL OLIVETO 4193 TALAGANTE",
+    "OTRO": ""
+}
+
+DATABASE_PERSONAL = {
+    "Marcos Escobar": {"rut": "8.546.549-K", "cargo": "Técnico"},
+    "Carlos Narbona": {"rut": "20.121.067-K", "cargo": "Representante Técnico"},
+    "Cristian Corral": {"rut": "16.630.012-6", "cargo": "Técnico"},
+    "Eduardo Inostroza": {"rut": "18.692.998-5", "cargo": "Técnico"},
+    "Juan Vásquez": {"rut": "15.629.902-2", "cargo": "Técnico"},
+    "Maximiliano Caro": {"rut": "20.120.770-3", "cargo": "Representante Técnico"},
+    "Víctor Becerra": {"rut": "17.759.655-8", "cargo": "Técnico"},
+    "Sebastián Carrillo": {"rut": "19.514.568-7", "cargo": "Representante Técnico"},
+    "Cristian Saavedra": {"rut": "19.703.885-3", "cargo": "Técnico"},
+    "Juan Callofa": {"rut": "15.531.428-1", "cargo": "Representante Técnico"},
+    "OTRO": {"rut": "", "cargo": ""}
+}
 
 DATABASE_KPI_ESTRUCTURADA = {
     "Plagas": {
         "Servicio desinsectacion sin señaletica calavera, medidas preventivas en el mes": 8,
         "Servicio sanitizacion baños sin sanitizar y marcaje durante el mes": 4,
-        "Servicio de desinsectacion y sanitizacion desprolijo (por 2 vez)": 8
+        "Servicio sanitizacion baños sin sanitizar y marcaje por 2 vez": 8,
+        "Servicio de desinsectacion y sanitizacion desprolijo (durante el mes)": 4,
+        "Servicio de desinsectacion y sanitizacion desprolijo (por 2 vez)": 8,
+        "Mantencion desprolija de dispositivos de control, feromonas (durante el mes)": 4,
+        "Mantencion desprolija de dispositivos de control, feromonas (por 2 vez)": 8,
+        "Mantencion desprolija de dispositivos de control, tuv (durante el mes)": 4,
+        "Mantencion desprolija de dispositivos de control, tuv (por 2 vez)": 8,
+        "Mantencion desprolija de dispositivos de control, en mal estado (durante el mes)": 4,
+        "Mantencion desprolija de dispositivos de control, en mal estado (por 2 vez)": 8,
+        "No realización de planos durante la instalacion/emergencia (durante el mes)": 4,
+        "No realización de planos durante la instalacion/emergencia (por 2 vez)": 8,
+        "Devolucion de guia de despacho (durante el mes)": 4,
+        "Devolucion de guia de despacho (por 2 vez)": 8
     },
     "Fumigaciones": {
         "No realizar inyeccion/ventilacion según proc. (Sin fugas, en el mes)": 4,
+        "No realizar inyeccion/ventilacion según proc. (Sin fugas, por 2 vez)": 8,
         "No realizar inyeccion/ventilacion según proc. (Con fugas o riesgo)": 8
     },
     "Rapaces": {
@@ -171,11 +238,38 @@ DATABASE_KPI_ESTRUCTURADA = {
     },
     "Seguridad": {
         "No realiza Check List de Vehículos durante el mes": 8,
-        "Uso incorrecto de EPP": 8
+        "Tener accidentes de responsabilidad directa": 8,
+        "Uso incorrecto de EPP": 8,
+        "No usar EPP para los riesgos asociados en el lugar de trabajo": 8,
+        "Reclamo de cliente asociado a la Seguridad o mala conducción (durante el mes)": 4,
+        "Reclamo de cliente asociado a la Seguridad o mala conducción (2 vez)": 8,
+        "No dar aviso de manera inmediata cuando ocurra un accidente o incidente": 8,
+        "Realiza trabajo en altura/confinado sin examenes medicos al dia": 8,
+        "Conducir a exceso de velocidad 1 a 5 km/h (1 min)": 4,
+        "Conducir a exceso de velocidad 6 a 9 km/h (1 min)": 8,
+        "No dar correcta disposición a los residuos generados": 8,
+        "Disposición de residuos no autorizados en clientes/particulares": 8,
+        "Conducir a exceso de velocidad > 10 km/h": 8
     },
     "Calidad": {
         "Reprogramacion directo con cliente": 4,
-        "No cumple en realizar servicios programados sin justificacion": 4
+        "No comunica via correo si no cumple la ruta asignada": 4,
+        "No cumple en realizar servicios programados sin justificacion": 4,
+        "Certificados sin informacion o incompleta o ilegible": 6,
+        "Certificado no cumple indicaciones tecnicas": 6,
+        "No envio de informes asociados al certificado": 6,
+        "No ingresa mínimo dos recomendaciones por visita": 6,
+        "Guia de despacho sin nombre, rut y firma": 6,
+        "Reducion de la jornada y no cumplimiento de los procedimientos": 6,
+        "Falta de insumos, herramientas y/o equipos en camioneta": 6,
+        "No Utilizar ropa corporativa al iniciar la jornada": 6,
+        "No Respetar la normativa de los clientes (EPP, uso joyas)": 6,
+        "Vehiculo sucio, equipos mal almacenados": 6,
+        "Baja de Cliente asociada a mala gestión (<= 2%)": 0,
+        "Baja de Cliente asociada a mala gestión (> 2%)": 8,
+        "No usar Movil Form / Mala efectividad de llenado": 4,
+        "No notifica alarmas por Formulario o correo (1 vez)": 2,
+        "No notifica alarmas por Formulario o correo (2 vez)": 4
     },
     "RIOHS y Contrato": {
         "Presentación de gastos falsos en rendición": 8,
@@ -293,7 +387,6 @@ firma_archivo = st.file_uploader("Sube imagen de la firma (JPG, PNG)", type=['pn
 st.markdown("---")
 
 st.subheader("📎 8. Anexo de Evidencias")
-# AHORA ACEPTA PDF TAMBIÉN
 fotos_incidentes = st.file_uploader("Sube imágenes o documentos PDF de evidencia", accept_multiple_files=True, type=['png','jpg','jpeg','heic','pdf'])
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -319,47 +412,64 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
         
         pdf.t_seccion("4", "EVALUACION KPI Y PENALIZACIONES")
         if not tabla_faltas_pdf:
-            pdf.set_font("Arial", "I", 9); pdf.cell(0, 6, "No se registraron faltas.", ln=1)
+            pdf.set_font("Arial", "I", 9)
+            pdf.cell(0, 6, "No se registraron faltas.", ln=1)
         else:
             pdf.set_font("Arial", "B", 9)
             pdf.set_fill_color(0, 160, 224)
             pdf.set_text_color(255, 255, 255)
-            pdf.cell(0, 6, "  Desviaciones Registradas:", border=1, ln=1, fill=True)
+            # Bordes mas sutiles
+            pdf.cell(0, 7, "  Desviaciones Registradas:", border=0, ln=1, fill=True)
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Arial", "", 9)
             for row in tabla_faltas_pdf:
                 pdf.multi_cell(0, 6, f"> [{row[0]}] {row[1]} ({row[2]} Pts)", border=1)
             
-        pdf.ln(2); pdf.set_font("Arial", "B", 10)
-        pdf.set_fill_color(240, 240, 240)
-        pdf.cell(100, 6, f"PUNTAJE TOTAL: {puntos_acumulados} Pts", border=1, fill=True)
-        pdf.cell(90, 6, f"RESULTADO BONO: {bono_resultado}", border=1, ln=1, fill=True)
-        pdf.cell(190, 6, f"ACCION: {accion_kpi}", border=1, ln=1, fill=True)
+        pdf.ln(3)
+        pdf.set_font("Arial", "B", 10)
+        pdf.set_fill_color(248, 249, 250)
+        pdf.cell(100, 8, f"PUNTAJE TOTAL: {puntos_acumulados} Pts", border=1, fill=True)
+        pdf.cell(90, 8, f"RESULTADO BONO: {bono_resultado}", border=1, ln=1, fill=True)
+        pdf.cell(190, 8, f"ACCION: {accion_kpi}", border=1, ln=1, fill=True)
         
         pdf.t_seccion("5", "ANALISIS DE CAUSAS")
-        pdf.set_font("Arial", "B", 9); pdf.cell(0, 6, "Causas Inmediatas:", ln=1)
-        pdf.set_font("Arial", "", 9); pdf.multi_cell(0, 5, causa_inmediata if causa_inmediata else "N/A", border=1)
+        pdf.set_font("Arial", "B", 9)
+        pdf.cell(0, 6, "Causas Inmediatas:", ln=1)
+        pdf.set_font("Arial", "", 9)
+        pdf.multi_cell(0, 6, causa_inmediata if causa_inmediata else "N/A", border=1)
         pdf.ln(2)
-        pdf.set_font("Arial", "B", 9); pdf.cell(0, 6, "Causas Raiz:", ln=1)
-        pdf.set_font("Arial", "", 9); pdf.multi_cell(0, 5, causa_raiz if causa_raiz else "N/A", border=1)
+        pdf.set_font("Arial", "B", 9)
+        pdf.cell(0, 6, "Causas Raiz:", ln=1)
+        pdf.set_font("Arial", "", 9)
+        pdf.multi_cell(0, 6, causa_raiz if causa_raiz else "N/A", border=1)
         
         pdf.t_seccion("6", "PLAN DE ACCION (MEDIDAS CORRECTIVAS)")
-        pdf.set_font("Arial", "B", 9); pdf.cell(40, 6, "Responsable:", border=1)
-        pdf.set_font("Arial", "", 9); pdf.cell(150, 6, responsable_inv if responsable_inv else "No asignado", border=1, ln=1)
-        pdf.set_font("Arial", "B", 9); pdf.cell(40, 6, "Fecha Limite:", border=1)
-        pdf.set_font("Arial", "", 9); pdf.cell(150, 6, str(fecha_accion_inv), border=1, ln=1)
-        pdf.set_font("Arial", "B", 9); pdf.cell(0, 6, "Accion Correctiva a Implementar:", border=1, ln=1, fill=True)
-        pdf.set_font("Arial", "", 9); pdf.multi_cell(0, 6, accion_inv if accion_inv else "Sin acciones registradas.", border=1)
+        pdf.set_font("Arial", "B", 9)
+        pdf.cell(40, 7, "Responsable:", border=1)
+        pdf.set_font("Arial", "", 9)
+        pdf.cell(150, 7, responsable_inv if responsable_inv else "No asignado", border=1, ln=1)
+        pdf.set_font("Arial", "B", 9)
+        pdf.cell(40, 7, "Fecha Limite:", border=1)
+        pdf.set_font("Arial", "", 9)
+        pdf.cell(150, 7, str(fecha_accion_inv), border=1, ln=1)
         
-        # --- NUEVA SECCIÓN DE FIRMA ---
+        # Corrección visual del título Acción Correctiva
+        pdf.set_font("Arial", "B", 9)
+        pdf.set_fill_color(0, 160, 224) # Celeste
+        pdf.set_text_color(255, 255, 255) # Blanco
+        pdf.cell(0, 7, " Accion Correctiva a Implementar:", border=0, ln=1, fill=True)
+        pdf.set_text_color(0, 0, 0) # De vuelta a negro
+        pdf.set_font("Arial", "", 9)
+        pdf.multi_cell(0, 7, accion_inv if accion_inv else "Sin acciones registradas.", border=1)
+        
+        # --- SECCIÓN DE FIRMA ---
         if firma_archivo:
             pdf.t_seccion("7", "FIRMA DEL SUPERVISOR")
             tmp_firma, _, _ = procesar_archivo_evidencia(firma_archivo)
             if tmp_firma:
-                # Calculamos el espacio para centrar la firma
-                x_firma = (210 - 50) / 2 # 210mm es el ancho de A4, firma de 50mm
+                x_firma = (210 - 50) / 2 # Centrado horizontal
                 pdf.image(tmp_firma, x=x_firma, y=pdf.get_y(), w=50)
-                pdf.ln(40) # Dar espacio hacia abajo
+                pdf.ln(40)
                 os.remove(tmp_firma)
         
         if fotos_incidentes:
