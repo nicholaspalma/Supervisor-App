@@ -4,7 +4,7 @@ import os
 import tempfile
 import gc
 import io
-import fitz  # PyMuPDF
+import fitz  # PyMuPDF para lectura de PDFs
 from fpdf import FPDF
 from PIL import Image, ImageOps
 
@@ -29,8 +29,17 @@ st.markdown(f"""
     .stApp header {{background-color: transparent;}}
     h1, h2, h3, h4 {{color: {COLOR_AZUL_OSCURO};}}
     div[data-testid="stForm"] {{ border: 2px solid {COLOR_ROJO}; border-radius: 10px; padding: 20px; }}
-    button[kind="primary"] {{ background-color: {COLOR_ROJO} !important; border-color: {COLOR_ROJO} !important; color: white !important; font-weight: bold !important; border-radius: 8px; }}
-    button[kind="primary"]:hover {{ background-color: {COLOR_AZUL_OSCURO} !important; border-color: {COLOR_AZUL_OSCURO} !important; }}
+    button[kind="primary"] {{ 
+        background-color: {COLOR_ROJO} !important; 
+        border-color: {COLOR_ROJO} !important; 
+        color: white !important; 
+        font-weight: bold !important; 
+        border-radius: 8px; 
+    }}
+    button[kind="primary"]:hover {{ 
+        background-color: {COLOR_AZUL_OSCURO} !important; 
+        border-color: {COLOR_AZUL_OSCURO} !important; 
+    }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -71,7 +80,7 @@ def procesar_archivo_evidencia(uploaded_file):
 class SupervisionPDF(FPDF):
     def __init__(self):
         super().__init__()
-        self.set_draw_color(220, 220, 220)
+        self.set_draw_color(220, 220, 220) # Gris suave para bordes modernos
 
     def header(self):
         if os.path.exists('logo.png'):
@@ -91,11 +100,10 @@ class SupervisionPDF(FPDF):
         self.set_text_color(150, 150, 150)
         self.cell(0, 10, f"Pagina {self.page_no()} - Documento Confidencial", align="C")
 
-    # MEJORA: Se agregó "espacio_necesario" para evitar títulos huérfanos
-    def t_seccion(self, numero, texto, espacio_necesario=30):
-        # Si el espacio actual (y) más lo que necesita la sección supera el largo de la hoja (275mm)...
+    def t_seccion(self, numero, texto, espacio_necesario=35):
+        # Evita títulos huérfanos saltando de página si no hay espacio para el contenido inicial
         if self.get_y() + espacio_necesario > 275:
-            self.add_page() # ...crea una página nueva ANTES de imprimir el título.
+            self.add_page()
             
         self.ln(6)
         self.set_font("Arial", "B", 10)
@@ -126,11 +134,8 @@ class SupervisionPDF(FPDF):
             tmp, w, h = procesar_archivo_evidencia(f)
             if tmp:
                 ratio = h / w if w > 0 else 1
-                
-                # Redujimos un par de cm el alto para asegurar que conviva con el título
-                max_w = 140
-                max_h = 190 
-                
+                max_w = 145
+                max_h = 195 
                 calc_w = max_w
                 calc_h = max_w * ratio
                 
@@ -142,10 +147,8 @@ class SupervisionPDF(FPDF):
                     self.add_page()
                 
                 x_pos = (210 - calc_w) / 2
-                
                 self.image(tmp, x=x_pos, y=self.get_y(), w=calc_w, h=calc_h)
-                self.ln(calc_h + 10) # Espacio entre fotos
-                
+                self.ln(calc_h + 10) 
                 os.remove(tmp)
 
 # ==============================================================================
@@ -401,12 +404,17 @@ with col_pa3: fecha_accion_inv = st.date_input("Fecha límite", datetime.date.to
 
 st.markdown("---")
 
-st.subheader("✍️ 7. Firma del Supervisor")
+st.subheader("📝 7. Conclusiones Finales")
+conclusiones_finales = st.text_area("Ingrese las conclusiones de la investigación:", height=120)
+
+st.markdown("---")
+
+st.subheader("✍️ 8. Firma del Representante Técnico (RT)")
 firma_archivo = st.file_uploader("Sube imagen de la firma (JPG, PNG)", type=['png','jpg','jpeg'], key="firma")
 
 st.markdown("---")
 
-st.subheader("📎 8. Anexo de Evidencias")
+st.subheader("📎 9. Anexo de Evidencias")
 fotos_incidentes = st.file_uploader("Sube imágenes o documentos PDF de evidencia", accept_multiple_files=True, type=['png','jpg','jpeg','heic','pdf'])
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -432,8 +440,7 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
         
         pdf.t_seccion("4", "EVALUACION KPI Y PENALIZACIONES")
         if not tabla_faltas_pdf:
-            pdf.set_font("Arial", "I", 9)
-            pdf.cell(0, 6, "No se registraron faltas.", ln=1)
+            pdf.set_font("Arial", "I", 9); pdf.cell(0, 6, "No se registraron faltas.", ln=1)
         else:
             pdf.set_font("Arial", "B", 9)
             pdf.set_fill_color(0, 160, 224)
@@ -451,39 +458,31 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
         pdf.cell(90, 8, f"RESULTADO BONO: {bono_resultado}", border=1, ln=1, fill=True)
         pdf.cell(190, 8, f"ACCION: {accion_kpi}", border=1, ln=1, fill=True)
         
-        # MEJORA: Pedimos al menos 50mm libres para asegurar que Análisis de Causas esté junto
         pdf.t_seccion("5", "ANALISIS DE CAUSAS", espacio_necesario=50)
-        pdf.set_font("Arial", "B", 9)
-        pdf.cell(0, 6, "Causas Inmediatas:", ln=1)
-        pdf.set_font("Arial", "", 9)
-        pdf.multi_cell(0, 6, causa_inmediata if causa_inmediata else "N/A", border=1)
+        pdf.set_font("Arial", "B", 9); pdf.cell(0, 6, "Causas Inmediatas:", ln=1)
+        pdf.set_font("Arial", "", 9); pdf.multi_cell(0, 6, causa_inmediata if causa_inmediata else "N/A", border=1)
         pdf.ln(2)
-        pdf.set_font("Arial", "B", 9)
-        pdf.cell(0, 6, "Causas Raiz:", ln=1)
-        pdf.set_font("Arial", "", 9)
-        pdf.multi_cell(0, 6, causa_raiz if causa_raiz else "N/A", border=1)
+        pdf.set_font("Arial", "B", 9); pdf.cell(0, 6, "Causas Raiz:", ln=1)
+        pdf.set_font("Arial", "", 9); pdf.multi_cell(0, 6, causa_raiz if causa_raiz else "N/A", border=1)
         
         pdf.t_seccion("6", "PLAN DE ACCION (MEDIDAS CORRECTIVAS)", espacio_necesario=50)
-        pdf.set_font("Arial", "B", 9)
-        pdf.cell(40, 7, "Responsable:", border=1)
-        pdf.set_font("Arial", "", 9)
-        pdf.cell(150, 7, responsable_inv if responsable_inv else "No asignado", border=1, ln=1)
-        pdf.set_font("Arial", "B", 9)
-        pdf.cell(40, 7, "Fecha Limite:", border=1)
-        pdf.set_font("Arial", "", 9)
-        pdf.cell(150, 7, str(fecha_accion_inv), border=1, ln=1)
-        
-        pdf.set_font("Arial", "B", 9)
-        pdf.set_fill_color(0, 160, 224) 
-        pdf.set_text_color(255, 255, 255) 
+        pdf.set_font("Arial", "B", 9); pdf.cell(40, 7, "Responsable:", border=1)
+        pdf.set_font("Arial", "", 9); pdf.cell(150, 7, responsable_inv if responsable_inv else "No asignado", border=1, ln=1)
+        pdf.set_font("Arial", "B", 9); pdf.cell(40, 7, "Fecha Limite:", border=1)
+        pdf.set_font("Arial", "", 9); pdf.cell(150, 7, str(fecha_accion_inv), border=1, ln=1)
+        pdf.set_font("Arial", "B", 9); pdf.set_fill_color(0, 160, 224); pdf.set_text_color(255, 255, 255)
         pdf.cell(0, 7, " Accion Correctiva a Implementar:", border=0, ln=1, fill=True)
-        pdf.set_text_color(0, 0, 0) 
-        pdf.set_font("Arial", "", 9)
+        pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", "", 9)
         pdf.multi_cell(0, 7, accion_inv if accion_inv else "Sin acciones registradas.", border=1)
         
+        # --- SECCIÓN 7: CONCLUSIONES FINALES ---
+        pdf.t_seccion("7", "CONCLUSIONES FINALES DE LA INVESTIGACION", espacio_necesario=45)
+        pdf.set_font("Arial", "", 9)
+        pdf.multi_cell(0, 6, conclusiones_finales if conclusiones_finales else "Sin conclusiones registradas.", border=1)
+
+        # --- SECCIÓN 8: FIRMA ---
         if firma_archivo:
-            # MEJORA: Asegurar que haya espacio para la firma (al menos 60mm)
-            pdf.t_seccion("7", "FIRMA DEL SUPERVISOR", espacio_necesario=60)
+            pdf.t_seccion("8", "FIRMA DEL REPRESENTANTE TECNICO (RT)", espacio_necesario=60)
             tmp_firma, _, _ = procesar_archivo_evidencia(firma_archivo)
             if tmp_firma:
                 x_firma = (210 - 50) / 2 
@@ -491,10 +490,9 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
                 pdf.ln(40)
                 os.remove(tmp_firma)
         
+        # --- SECCIÓN 9: EVIDENCIAS ---
         if fotos_incidentes:
-            # MEJORA: Obligamos a reservar 100mm para que el título de evidencias 
-            # sí o sí salga con la primera imagen pegada
-            pdf.t_seccion("8", "EVIDENCIA FOTOGRAFICA Y DOCUMENTAL", espacio_necesario=100)
+            pdf.t_seccion("9", "EVIDENCIA FOTOGRAFICA Y DOCUMENTAL", espacio_necesario=100)
             pdf.galeria(fotos_incidentes)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
@@ -507,10 +505,15 @@ if st.button("🚀 GUARDAR Y GENERAR REPORTE (PDF)", use_container_width=True, t
 
 if st.session_state.pdf_supervision is not None:
     st.success("✅ Reporte Generado Exitosamente")
+    
+    # Formateo del nombre del archivo dinámico
+    fecha_str = fecha_incidente.strftime("%d-%m-%Y")
+    nombre_archivo_generado = f"{fecha_str}_informe de investigacion-{nombre_personal}.pdf"
+    
     st.download_button(
         label="📄 DESCARGAR INFORME DE SUPERVISIÓN (PDF)",
         data=st.session_state.pdf_supervision,
-        file_name="Informe_Supervision_Rentokil.pdf",
+        file_name=nombre_archivo_generado,
         mime="application/pdf",
         use_container_width=True
     )
